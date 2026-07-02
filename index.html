@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multas Libertadores de San Cristóbal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        :root {
+            --club-green: #00693E;
+            --club-yellow: #FFD700;
+            --club-white: #FFFFFF;
+        }
+        body {
+            background-color: #f0f2f5;
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .bg-club-green { background-color: var(--club-green); }
+        .text-club-green { color: var(--club-green); }
+        .border-club-green { border-color: var(--club-green); }
+        .bg-club-yellow { background-color: var(--club-yellow); }
+        .text-club-yellow { color: var(--club-yellow); }
+        
+        .tab-active {
+            border-bottom: 4px solid var(--club-green);
+            color: var(--club-green);
+            background-color: #fff;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        .interactive-item {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .interactive-item:hover {
+            background-color: #f0fdf4;
+            transform: translateX(4px);
+        }
+        .interactive-item:active {
+            background-color: #dcfce7;
+            transform: scale(0.98);
+        }
+
+        .ruleta-anim {
+            transition: all 0.1s;
+        }
+
+        /* Badges Categorias */
+        .badge-1ra { background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+        .badge-3ra { background-color: #fef9c3; color: #a16207; border: 1px solid #fef08a; }
+        .badge-ct { background-color: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff; }
+
+        /* Edit Mode Controls */
+        .edit-control { display: none; }
+        body.edit-mode .edit-control { display: inline-flex; }
+        body.edit-mode .hide-on-edit { display: none; }
+        body.edit-mode .badge-editable { cursor: pointer; border: 2px dashed currentColor; animation: pulse 2s infinite; }
+        
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+
+        /* Status Toast */
+        #status-toast {
+            position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: white; padding: 8px 16px;
+            border-radius: 20px; font-size: 12px; z-index: 100;
+            display: none; transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body class="min-h-screen pb-24 relative select-none">
+
+    <div id="status-toast">Conectando...</div>
+
+    <header class="bg-club-green text-white shadow-lg sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-14 h-14 bg-white rounded-full flex items-center justify-center border-2 border-club-yellow shadow-md overflow-hidden p-1">
+                    <img src="EscudoLiber.png" alt="Escudo LSC" class="w-full h-full object-contain" onerror="this.style.display='none'; this.nextElementSibling.style.display='block'">
+                    <span class="font-bold text-club-green text-xs text-center leading-tight hidden">L.S.C.<br><i class="fas fa-shield-alt"></i></span>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold uppercase tracking-wide text-club-yellow leading-tight">Libertadores</h1>
+                    <div class="flex items-center gap-1">
+                        <p class="text-xs text-white/80">San Cristóbal</p>
+                        <span id="connection-status" class="w-2.5 h-2.5 rounded-full bg-gray-400 border border-white/20" title="Estado Conexión"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="toggleEditMode()" id="btn-edit-mode" class="bg-white/10 text-white px-3 py-2 rounded font-bold text-xs shadow hover:bg-white/20 transition flex items-center gap-1 active:scale-95 border border-transparent">
+                    <i class="fas fa-pencil-alt"></i>
+                </button>
+                <button onclick="toggleAdmin()" class="bg-club-yellow text-club-green px-3 py-2 rounded font-bold text-xs shadow hover:bg-yellow-400 transition flex items-center gap-1 active:scale-95">
+                    <i class="fas fa-plus"></i> <span class="hidden sm:inline">Nueva</span>
+                </button>
+                <button onclick="exportarDeudas()" class="bg-white/10 text-white px-3 py-2 rounded font-bold text-xs shadow hover:bg-white/20 transition flex items-center gap-1">
+                    <i class="fas fa-file-csv"></i>
+                </button>
+                <button onclick="exportarDeudasPDF()" class="bg-white/10 text-white px-3 py-2 rounded font-bold text-xs shadow hover:bg-white/20 transition flex items-center gap-1">
+                    <i class="fas fa-file-pdf"></i>
+                </button>
+            </div>
+        </div>
+        <div id="edit-banner" class="hidden bg-orange-500 text-white text-xs font-bold text-center py-1">
+            MODO EDICIÓN: Tocá para cambiar categoría o borrar.
+        </div>
+    </header>
+
+    <div class="bg-white border-b border-gray-200 shadow-sm">
+        <div class="container mx-auto px-4 py-4 grid grid-cols-2 gap-4">
+            <div class="bg-red-50 p-3 rounded-lg border border-red-100 flex flex-col justify-center">
+                <p class="text-[10px] sm:text-xs text-red-600 uppercase font-bold mb-1 tracking-wider">Deuda Pendiente</p>
+                <h3 class="text-xl sm:text-2xl font-black text-red-700" id="total-deuda">$0</h3>
+            </div>
+            <div class="bg-green-50 p-3 rounded-lg border border-green-100 flex flex-col justify-center">
+                <p class="text-[10px] sm:text-xs text-green-600 uppercase font-bold mb-1 tracking-wider">Caja Actual</p>
+                <h3 class="text-xl sm:text-2xl font-black text-green-700" id="total-recaudado">$0</h3>
+            </div>
+        </div>
+    </div>
+
+    <nav class="bg-white shadow-sm sticky top-[72px] z-40">
+        <div class="container mx-auto flex justify-around text-center border-b border-gray-100">
+            <button onclick="showTab('deudas')" id="btn-deudas" class="py-3 px-2 text-xs sm:text-sm uppercase font-bold flex-1 tab-active transition-colors flex flex-col items-center justify-center gap-1">
+                <i class="fas fa-file-invoice-dollar text-base"></i> Deudas
+            </button>
+            <button onclick="showTab('pendientes')" id="btn-pendientes" class="py-3 px-2 text-xs sm:text-sm uppercase font-bold flex-1 text-gray-400 hover:text-gray-600 transition-colors flex flex-col items-center justify-center gap-1">
+                <i class="fas fa-dice text-base"></i> Ruleta
+            </button>
+            <button onclick="showTab('cobrados')" id="btn-cobrados" class="py-3 px-2 text-xs sm:text-sm uppercase font-bold flex-1 text-gray-400 hover:text-gray-600 transition-colors flex flex-col items-center justify-center gap-1">
+                <i class="fas fa-check-circle text-base"></i> Cobrados
+            </button>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-4 max-w-4xl min-h-[50vh]">
+        <section id="tab-deudas" class="space-y-4 animate-fade-in">
+            <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mb-2 rounded-r hide-on-edit">
+                <p class="text-xs text-blue-700">
+                    <i class="fas fa-info-circle mr-1"></i> Toca una multa para cobrarla.
+                </p>
+            </div>
+            <input type="text" id="search-deudas" onkeyup="renderDeudas()" placeholder="Buscar jugador..." class="w-full p-3 rounded-lg border border-gray-300 mb-2 focus:ring-2 focus:ring-club-green outline-none shadow-sm">
+            <div id="list-deudas" class="grid gap-4 md:grid-cols-2"></div>
+        </section>
+
+        <section id="tab-pendientes" class="hidden space-y-4 animate-fade-in">
+            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-2 rounded-r hide-on-edit">
+                 <p class="text-xs text-yellow-800">
+                    <i class="fas fa-exclamation-triangle mr-1"></i> Jugadores que deben tirar la ruleta.
+                </p>
+            </div>
+            <div id="list-pendientes" class="bg-white rounded-xl shadow-sm overflow-hidden divide-y divide-gray-100"></div>
+        </section>
+
+        <section id="tab-cobrados" class="hidden space-y-4 animate-fade-in">
+             <div class="flex justify-between items-center mb-2 px-1">
+                <h2 class="text-lg font-bold text-gray-800">Historial de Ingresos</h2>
+                <span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full border" id="count-cobrados">0 pagos</span>
+            </div>
+            <div id="list-cobrados" class="bg-white rounded-xl shadow-sm overflow-hidden"></div>
+        </section>
+    </main>
+
+    <div id="admin-modal" class="fixed inset-0 bg-black/60 z-[60] hidden flex items-end sm:items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+        <div class="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+            <div class="bg-club-green p-4 flex justify-between items-center">
+                <h3 class="text-white font-bold text-lg"><i class="fas fa-edit mr-2"></i>Nueva Entrada</h3>
+                <button onclick="toggleAdmin()" class="text-white hover:text-club-yellow transition w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Tipo de Acción</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="setMode('multa')" id="mode-multa" class="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 font-bold text-xs sm:text-sm ring-2 ring-red-500 shadow-sm">Deuda</button>
+                        <button onclick="setMode('ruleta')" id="mode-ruleta" class="p-3 rounded-lg border border-yellow-200 text-yellow-700 font-bold text-xs sm:text-sm shadow-sm hover:bg-yellow-50">Ruleta</button>
+                        <button onclick="setMode('pago')" id="mode-pago" class="p-3 rounded-lg border border-gray-200 text-gray-500 font-bold text-xs sm:text-sm shadow-sm hover:bg-gray-50">Pago</button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="col-span-2">
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Jugador</label>
+                        <input type="text" id="input-jugador" list="players-list" class="w-full p-3 border border-gray-300 rounded-lg focus:border-club-green focus:ring-1 focus:ring-club-green outline-none text-base" placeholder="Nombre">
+                        <datalist id="players-list"></datalist>
+
+                        <div class="grid grid-cols-2 gap-3 mt-2">
+                            <input type="text" id="input-nombre" placeholder="Nombre" class="p-3 border rounded-lg focus:border-club-green focus:ring-1 focus:ring-club-green outline-none">
+                            <input type="text" id="input-apellido" placeholder="Apellido" class="p-3 border rounded-lg focus:border-club-green focus:ring-1 focus:ring-club-green outline-none">
+                        </div>
+                        <input type="text" id="input-telefono" placeholder="54911..." class="w-full p-3 border rounded-lg mt-2 focus:border-club-green focus:ring-1 focus:ring-club-green outline-none">
+
+                    </div>
+                    <div class="col-span-1">
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Categoría</label>
+                        <select id="input-categoria" class="w-full p-3 border border-gray-300 rounded-lg focus:border-club-green focus:ring-1 focus:ring-club-green outline-none text-base bg-white">
+                            <option value="1ra" selected>1ra</option>
+                            <option value="3ra">3ra</option>
+                            <option value="CT">CT</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1" id="label-concepto">Concepto / Multa</label>
+                    <input type="text" id="input-concepto" class="w-full p-3 border border-gray-300 rounded-lg focus:border-club-green focus:ring-1 focus:ring-club-green outline-none text-base" placeholder="Ej: $10k, Gomitas...">
+                </div>
+                <button onclick="guardarEntradaManual()" class="w-full bg-club-green text-white font-bold py-3.5 rounded-lg shadow-lg hover:bg-green-800 transition transform active:scale-[0.98] uppercase tracking-wide text-sm">
+                    Guardar Cambios
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ruleta-modal" class="fixed inset-0 bg-black/60 z-[70] hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 animate-fade-in text-center relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-600 via-yellow-400 to-green-600"></div>
+            <div class="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-2 text-yellow-600 text-2xl shadow-inner border-2 border-yellow-200">
+                <i class="fas fa-dice"></i>
+            </div>
+            <div class="flex items-center justify-center gap-2 mb-1">
+                <h3 class="text-xl font-bold text-gray-800" id="ruleta-player">Jugador</h3>
+                <span id="ruleta-cat-badge" class="text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">1ra</span>
+            </div>
+            <p class="text-xs text-gray-500 mb-6 uppercase tracking-wider" id="ruleta-motivo">Motivo</p>
+            <div class="bg-gray-100 rounded-xl p-6 mb-6 border-2 border-gray-200 relative min-h-[120px] flex items-center justify-center">
+                <div id="ruleta-display" class="text-2xl font-black text-gray-800 uppercase leading-tight">¿Listo?</div>
+            </div>
+            <div class="grid grid-cols-1 gap-3">
+                <button id="btn-girar" onclick="girarRuleta()" class="py-3 px-4 rounded-lg bg-club-green text-white font-bold text-lg hover:bg-green-800 shadow-lg transform active:scale-95 transition-all">
+                    GIRAR RULETA
+                </button>
+                <div id="ruleta-actions" class="hidden grid grid-cols-2 gap-3">
+                    <button onclick="closeRuletaModal()" class="py-2 px-4 rounded-lg border border-gray-300 text-gray-600 font-bold hover:bg-gray-50">Cancelar</button>
+                    <button onclick="confirmarRuleta()" class="py-2 px-4 rounded-lg bg-green-600 text-white font-bold hover:bg-green-700 shadow-md">Confirmar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const PLANTEL_MAESTRO = [
+            { nombre: "Richard", apellido: "Garayalde", telefono: "5491167955215", categoria: "1ra" },
+            { nombre: "Joaquin", apellido: "Alberto", telefono: "5491132164060", categoria: "1ra" },
+            { nombre: "Marcos", apellido: "Benitez", telefono: "5491136078776", categoria: "1ra" },
+            { nombre: "Jonathan", apellido: "Benquet", telefono: "5491140819554", categoria: "1ra" },
+            { nombre: "Agustin", apellido: "Cabrera", telefono: "5491156597144", categoria: "1ra" },
+            { nombre: "Maximiliano", apellido: "Del Palacio", telefono: "5491161653685", categoria: "1ra" },
+            { nombre: "Walter", apellido: "Fiocchi", telefono: "5491128714896", categoria: "1ra" },
+            { nombre: "Agustin", apellido: "Gardiol", telefono: "5491140707889", categoria: "1ra" },
+            { nombre: "Nicolas", apellido: "Gonzi", telefono: "5491122986215", categoria: "1ra" },
+            { nombre: "Lautaro", apellido: "Gregorio", telefono: "5491126395849", categoria: "1ra" },
+            { nombre: "Yonathan", apellido: "Gutierrez", telefono: "5491155801302", categoria: "1ra" },
+            { nombre: "Facundo", apellido: "Ledesma", telefono: "5491154851592", categoria: "1ra" },
+            { nombre: "Gonzalo", apellido: "Quiroga", telefono: "5491123732627", categoria: "1ra" },
+            { nombre: "Agustin", apellido: "Reche", telefono: "5491124042959", categoria: "1ra" },
+            { nombre: "Brian", apellido: "Rumak", telefono: "5491164303159", categoria: "1ra" },
+            { nombre: "Thiago", apellido: "Silva", telefono: "5491168197757", categoria: "1ra" },
+            { nombre: "Ignacio", apellido: "Smokvina", telefono: "5491170843103", categoria: "1ra" },
+            { nombre: "Gian Luca", apellido: "Aguinaco", telefono: "5491144366833", categoria: "3ra" },
+            { nombre: "Ramiro", apellido: "Albornoz", telefono: "5491151801630", categoria: "3ra" },
+            { nombre: "Agustin", apellido: "Almiron", telefono: "5491125366989", categoria: "3ra" },
+            { nombre: "Jeremías", apellido: "Ayunta", telefono: "5491127010681", categoria: "3ra" },
+            { nombre: "Federico", apellido: "Bursa", telefono: "5491123407595", categoria: "3ra" },
+            { nombre: "Tiziano", apellido: "Diaz", telefono: "5491141622653", categoria: "3ra" },
+            { nombre: "Facundo", apellido: "Faya", telefono: "5491167182751", categoria: "3ra" },
+            { nombre: "Ezequiel", apellido: "Ferreyra", telefono: "5491135016335", categoria: "3ra" },
+            { nombre: "Máximo", apellido: "Fluck", telefono: "5491130057862", categoria: "3ra" },
+            { nombre: "Frank", apellido: "Figueroa", telefono: "5491165087479", categoria: "3ra" },
+            { nombre: "Ramiro", apellido: "Mack", telefono: "5491170144031", categoria: "3ra" },
+            { nombre: "Benjamin", apellido: "Matoff", telefono: "5491122579043", categoria: "3ra" },
+            { nombre: "Bautista", apellido: "Milocco", telefono: "5491170311380", categoria: "3ra" },
+            { nombre: "Mirko", apellido: "Perez", telefono: "5491131461480", categoria: "3ra" },
+            { nombre: "Thiago", apellido: "Perviu", telefono: "5491133291907", categoria: "3ra" },
+            { nombre: "Fabrizio", apellido: "Ramirez", telefono: "5491131323015", categoria: "3ra" },
+            { nombre: "Matias", apellido: "Reyes", telefono: "5491157078051", categoria: "3ra" },
+            { nombre: "Tomás", apellido: "Rodriguez", telefono: "5491130175610", categoria: "3ra" },
+            { nombre: "Ignacio", apellido: "Sanchez", telefono: "5491153402732", categoria: "3ra" },
+            { nombre: "Bautista", apellido: "Stanizzi", telefono: "5491127209288", categoria: "3ra" },
+            { nombre: "Camilo", apellido: "Tomasetig", telefono: "5491161360756", categoria: "3ra" },
+            { nombre: "Benito", apellido: "Wiemeyer", telefono: "5491130788495", categoria: "3ra" },
+            { nombre: "Benjamín", apellido: "Zeballos", telefono: "5491140979433", categoria: "3ra" },
+            { nombre: "Patricio", apellido: "Cora", telefono: "", categoria: "CT" },
+            { nombre: "Daniel", apellido: "Delledonne", telefono: "", categoria: "CT" },
+            { nombre: "Ali", apellido: "Kassay", telefono: "", categoria: "CT" },
+            { nombre: "Nicolás", apellido: "Navarro", telefono: "5491134742737", categoria: "CT" },
+            { nombre: "Ignacio", apellido: "Navarro", telefono: "", categoria: "CT" },
+            { nombre: "Juan", apellido: "Paredes", telefono: "", categoria: "CT" },
+            { nombre: "Eduardo", apellido: "Theunynck", telefono: "5491167182751", categoria: "CT" },
+            { nombre: "Matías", apellido: "Torres", telefono: "", categoria: "CT" }
+        ];
+
+        function getNombreCompleto(p) {
+            if (p.apellido && p.nombre) return `${p.apellido} ${p.nombre}`;
+            return p.nombre || '';
+        }
+
+        function getMensajeDeuda(p) {
+            let total = 0;
+            const detalle = (p.items || []).map(i => {
+                const val = parseMoney(i);
+                total += val;
+                return `- ${i}`;
+            }).join('%0A');
+            return `Hola ${p.nombre || ''}, tenés las siguientes multas:%0A${detalle}%0A%0ATotal: $${total}`;
+        }
+
+        async function exportarDeudasPDF() {
+            if (!state.deudas || state.deudas.length === 0) {
+                alert("No hay deudas para exportar.");
+                return;
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const img = new Image();
+            img.src = "EscudoLiber.png";
+
+            img.onload = function () {
+                const data = state.deudas.map(p => {
+                    let total = 0;
+                    const items = p.items.map(i => {
+                        const val = parseMoney(i);
+                        total += val;
+                        return { concepto: i, monto: val };
+                    });
+                    return { nombre: p.nombre, apellido: p.apellido, categoria: p.categoria || '1ra', total, items };
+                });
+
+                data.sort((a, b) => b.total - a.total);
+
+                doc.addImage(img, "PNG", 10, 10, 20, 20);
+                doc.setFontSize(16);
+                doc.text("Multas - Libertadores SC", 35, 18);
+                doc.setFontSize(10);
+                doc.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, 35, 24);
+
+                let y = 40;
+                data.forEach(p => {
+                    doc.setFontSize(12);
+                    doc.setFont(undefined, "bold");
+                    doc.text(`${getNombreCompleto(p)} (${p.categoria})`, 10, y);
+                    doc.setFont(undefined, "normal");
+                    doc.text(`Total: $${p.total.toLocaleString('es-AR')}`, 140, y);
+                    y += 6;
+
+                    p.items.sort((a, b) => b.monto - a.monto);
+                    p.items.forEach(item => {
+                        doc.setFontSize(10);
+                        doc.text(`- ${item.concepto}`, 12, y);
+                        doc.text(`$${item.monto.toLocaleString('es-AR')}`, 160, y, { align: "right" });
+                        y += 5;
+                        if (y > 280) { doc.addPage(); y = 20; }
+                    });
+                    y += 5;
+                });
+                doc.save("deudas_lsc.pdf");
+            };
+        }
+        
+        function exportarDeudas() {
+            if (!state.deudas || state.deudas.length === 0) {
+                alert("No hay deudas para exportar a CSV.");
+                return;
+            }
+            let csvContent = "data:text/csv;charset=utf-8,Nombre,Apellido,Categoria,Concepto,Monto\n";
+            state.deudas.forEach(p => {
+                p.items.forEach(item => {
+                    const monto = parseMoney(item);
+                    csvContent += `${p.nombre},${p.apellido || ''},${p.categoria || '1ra'},"${item}",$${monto}\n`;
+                });
+            });
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "deudas_lsc.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyBdYvEPLmHKJGadBsN1MGNsoSn-Py9UJw8",
+          authDomain: "multas-lsc.firebaseapp.com",
+          projectId: "multas-lsc",
+          storageBucket: "multas-lsc.firebasestorage.app",
+          messagingSenderId: "801638625656",
+          appId: "1:801638625656:web:036228edf5697af3f1588d",
+          measurementId: "G-13GWJ414ZC"
+        };
+
+        let db;
+        let isOnline = false;
+
+        let state = {
+            deudas: [],
+            pendientes: [],
+            cobrados: []
+        };
+
+        const DOC_ID = 'estado_club';
+        const COLL_ID = 'multas_lsc';
+
+        function showToast(msg) {
+            const t = document.getElementById('status-toast');
+            t.innerText = msg;
+            t.style.display = 'block';
+            t.style.opacity = '1';
+            setTimeout(() => { t.style.opacity = '0'; setTimeout(()=>t.style.display='none', 300); }, 3000);
+        }
+
+        function updateStatus(status) {
+            const el = document.getElementById('connection-status');
+            if(status === 'online') {
+                el.className = "w-2.5 h-2.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)] border border-white/20";
+            } else if(status === 'connecting') {
+                el.className = "w-2.5 h-2.5 rounded-full bg-yellow-400 animate-pulse border border-white/20";
+            } else {
+                el.className = "w-2.5 h-2.5 rounded-full bg-gray-400 border border-white/20";
+            }
+        }
+
+        window.onload = function() {
+            refreshAll(); 
+            initFirebase();
+
+            document.getElementById('input-jugador').addEventListener('input', (e) => {
+                const searchVal = e.target.value.toLowerCase().trim();
+                const match = PLANTEL_MAESTRO.find(p => 
+                    `${p.nombre} ${p.apellido}`.toLowerCase() === searchVal ||
+                    p.nombre.toLowerCase() === searchVal ||
+                    p.apellido.toLowerCase() === searchVal
+                );
+
+                if (match) {
+                    document.getElementById('input-nombre').value = match.nombre;
+                    document.getElementById('input-apellido').value = match.apellido;
+                    document.getElementById('input-telefono').value = match.telefono || '';
+                    document.getElementById('input-categoria').value = match.categoria;
+                }
+            });
+        };
+
+        function initFirebase() {
+            updateStatus('connecting');
+            try {
+                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                db.enablePersistence({ synchronizeTabs: true }).catch(err => console.log(err.code));
+                listenToUpdates();
+            } catch (e) {
+                updateStatus('offline');
+                showToast("Modo local.");
+            }
+        }
+
+        function listenToUpdates() {
+            db.collection(COLL_ID).doc(DOC_ID).onSnapshot({ includeMetadataChanges: true }, (doc) => {
+                const source = doc.metadata.fromCache ? "local" : "server";
+                if (doc.exists) {
+                    state = doc.data();
+                    if(source === 'server') { updateStatus('online'); showToast("Datos actualizados"); }
+                    refreshAll();
+                } else { if(source === 'server') saveState(); }
+            }, (error) => { updateStatus('offline'); });
+        }
+
+        function saveState() {
+            if(!db) return;
+            db.collection(COLL_ID).doc(DOC_ID).set(state).catch(e => console.warn(e));
+        }
+
+        const ruletaBase = ["$10.000", "5kg de Frutas", "10L de Agua", "Gomitas", "Safa", "Gomitas", "Duplica (tira de nuevo)", "Safa", "$5.000", "2kg de Fruta", "Gomitas", "5L de Agua", "Gomitas", "5kg de Frutas"];
+
+        let activeRuleta = null; 
+        let currentResult = null;
+        let activeRuletaOptions = [];
+        let isDuplicating = false; 
+        let isEditMode = false;
+        let currentMode = 'multa';
+
+        function parseMoney(str) {
+            if(!str) return 0;
+            const cleanStr = str.toString().toLowerCase().replace(/\s/g, '').replace(/\./g, '');
+            const match = cleanStr.match(/\$(\d+)(k)?/);
+            if (match) {
+                let val = parseInt(match[1]);
+                if (match[2] === 'k') val *= 1000;
+                return val;
+            }
+            return 0;
+        }
+
+        function getCategoryBadgeClass(cat) {
+            switch(cat) {
+                case '3ra': return 'badge-3ra';
+                case 'CT': return 'badge-ct';
+                default: return 'badge-1ra';
+            }
+        }
+
+        function getPlayerCategory(nombre, apellido) {
+            const allLists = [...(state.deudas||[]), ...(state.pendientes||[]), ...(state.cobrados||[])];
+            const player = allLists.find(p => p.nombre.toLowerCase() === nombre.toLowerCase() && (p.apellido || '').toLowerCase() === (apellido || '').toLowerCase());
+            return player ? (player.categoria || '1ra') : '1ra';
+        }
+
+        function calculateTotals() {
+            let totalDeuda = 0, totalRecaudado = 0;
+            if(state.deudas) state.deudas.forEach(p => { if(p.items) p.items.forEach(item => totalDeuda += parseMoney(item)); });
+            if(state.cobrados) state.cobrados.forEach(p => { totalRecaudado += p.raw || parseMoney(p.monto); });
+            document.getElementById('total-deuda').innerText = `$${totalDeuda.toLocaleString('es-AR')}`;
+            document.getElementById('total-recaudado').innerText = `$${totalRecaudado.toLocaleString('es-AR')}`;
+            document.getElementById('count-cobrados').innerText = `${state.cobrados ? state.cobrados.length : 0} pagos`;
+        }
+
+        function refreshAll() {
+            calculateTotals();
+            renderDeudas();
+            renderPendientes();
+            renderCobrados();
+            
+            document.getElementById('players-list').innerHTML = PLANTEL_MAESTRO
+                .sort((a,b) => a.apellido.localeCompare(b.apellido))
+                .map(p => `<option value="${p.nombre} ${p.apellido}">`)
+                .join('');
+        }
+
+        function toggleEditMode() {
+            isEditMode = !isEditMode;
+            document.body.classList.toggle('edit-mode', isEditMode);
+            const btn = document.getElementById('btn-edit-mode'), banner = document.getElementById('edit-banner');
+            if (isEditMode) { btn.classList.add('bg-orange-500', 'text-white'); btn.classList.remove('bg-white/10'); banner.classList.remove('hidden'); }
+            else { btn.classList.remove('bg-orange-500', 'text-white'); btn.classList.add('bg-white/10'); banner.classList.add('hidden'); }
+        }
+
+        function showTab(tabId) {
+            ['deudas', 'pendientes', 'cobrados'].forEach(t => { document.getElementById('tab-'+t).classList.add('hidden'); document.getElementById('btn-'+t).classList.remove('tab-active', 'text-club-green'); document.getElementById('btn-'+t).classList.add('text-gray-400'); });
+            document.getElementById('tab-'+tabId).classList.remove('hidden');
+            document.getElementById('btn-'+tabId).classList.add('tab-active', 'text-club-green');
+            document.getElementById('btn-'+tabId).classList.remove('text-gray-400');
+        }
+
+        function renderDeudas() {
+            const container = document.getElementById('list-deudas'), searchVal = document.getElementById('search-deudas').value.toLowerCase();
+            if(!state.deudas) return;
+            container.innerHTML = state.deudas.filter(p => p.nombre.toLowerCase().includes(searchVal)).sort((a,b)=>a.nombre.localeCompare(b.nombre)).map((p, pIndex) => {
+                let money = 0; p.items.forEach(i => money += parseMoney(i));
+                return `
+                <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-400 relative">
+                    <div class="flex justify-between items-start mb-3">
+                        <div class="flex items-center gap-2">
+                            <h3 class="font-bold text-lg text-gray-800">${getNombreCompleto(p)}</h3>
+                            ${p.telefono ? `
+                            <a href="https://wa.me/${p.telefono}?text=${getMensajeDeuda(p)}" target="_blank" class="bg-green-500 text-white px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                                <i class="fab fa-whatsapp"></i>
+                            </a>
+                            ` : ''}
+                            <span onclick="cycleCategory('${p.nombre}', '${p.apellido || ''}')" class="text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${getCategoryBadgeClass(p.categoria)} badge-editable">${p.categoria || '1ra'}</span>
+                            <button onclick="deletePlayer('${p.nombre}', '${p.apellido || ''}')" class="edit-control ml-2 text-red-500 bg-red-100 p-1.5 rounded-full"><i class="fas fa-trash-alt text-xs"></i></button>
+                        </div>
+                        ${money > 0 ? `<span class="bg-red-100 text-red-700 font-bold px-2 py-1 rounded text-xs">$${money.toLocaleString()}</span>` : ''}
+                    </div>
+                    <ul class="text-sm space-y-2">
+                        ${p.items.map((item, iIndex) => `
+                            <li class="flex items-center justify-between gap-2 p-2 rounded bg-gray-50 border border-gray-100">
+                                <div class="flex items-center gap-2 flex-grow" onclick="if(!isEditMode) confirmarCobro('${p.nombre}', '${p.apellido || ''}', ${iIndex})">
+                                    <i class="fas ${parseMoney(item)>0 ? 'fa-money-bill-wave text-green-600' : 'fa-bolt text-yellow-500'} text-xs w-4"></i>
+                                    <span class="${parseMoney(item)>0 ? 'font-semibold text-gray-800' : 'text-gray-700'}">${item}</span>
+                                </div>
+                                <button onclick="deleteDeudaItem('${p.nombre}', '${p.apellido || ''}', ${iIndex})" class="edit-control text-red-500 px-2"><i class="fas fa-times"></i></button>
+                                <i class="fas fa-arrow-right text-gray-300 text-xs hide-on-edit"></i>
+                            </li>`).join('')}
+                    </ul>
+                </div>`;
+            }).join('');
+        }
+
+        function renderPendientes() {
+            const container = document.getElementById('list-pendientes');
+            if(!state.pendientes || state.pendientes.length === 0) { container.innerHTML = `<div class="p-8 text-center text-gray-400"><p>Nadie debe tirar la ruleta.</p></div>`; return; }
+            container.innerHTML = [...state.pendientes].sort((a,b)=>a.nombre.localeCompare(b.nombre)).map((p, pIdx) => `
+                <div class="p-4 group">
+                    <div class="flex items-center gap-3 mb-2">
+                        <div class="w-8 h-8 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center font-bold text-sm">${p.nombre.charAt(0)}</div>
+                        <span class="font-bold text-gray-800 text-lg">${getNombreCompleto(p)}</span>
+                        <span onclick="cycleCategory('${p.nombre}', '${p.apellido || ''}')" class="text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${getCategoryBadgeClass(p.categoria)} badge-editable">${p.categoria || '1ra'}</span>
+                    </div>
+                    <div class="pl-11 space-y-2">
+                        ${p.motivos.map((m, mIdx) => `
+                            <div class="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100">
+                                <span class="text-xs sm:text-sm text-gray-600 font-medium">${m}</span>
+                                <div class="flex items-center gap-2">
+                                    <button onclick="abrirRuleta('${p.nombre}', '${p.apellido || ''}', '${m}')" class="hide-on-edit bg-club-yellow text-club-green px-3 py-1 rounded text-xs font-bold"><i class="fas fa-dice"></i> Tirar</button>
+                                    <button onclick="deletePendiente('${p.nombre}', '${p.apellido || ''}', ${mIdx})" class="edit-control text-red-500 p-1"><i class="fas fa-trash-alt"></i></button>
+                                </div>
+                            </div>`).join('')}
+                    </div>
+                </div>`).join('');
+        }
+
+        function renderCobrados() {
+            const container = document.getElementById('list-cobrados');
+            if(!state.cobrados || state.cobrados.length === 0) { container.innerHTML = `<div class="p-8 text-center text-gray-400"><p>No hay cobros.</p></div>`; return; }
+            container.innerHTML = `<div class="divide-y divide-gray-100">${state.cobrados.map((p, index) => `
+                <div class="p-4 flex justify-between items-center">
+                    <div class="flex items-center gap-3">
+                        <div class="bg-green-100 p-2 rounded-full text-green-600"><i class="fas fa-check text-xs"></i></div>
+                        <div><span class="font-semibold text-gray-700 block">${getNombreCompleto(p)}</span><span class="text-[10px] text-gray-400 uppercase">${p.categoria}</span></div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="font-mono font-bold text-green-700 bg-green-50 px-2 py-1 rounded border text-sm">${p.monto}</span>
+                        <button onclick="deleteCobrado(${index})" class="edit-control text-red-400"><i class="fas fa-trash-alt"></i></button>
+                    </div>
+                </div>`).reverse().join('')}</div>`;
+        }
+
+        function deleteDeudaItem(n, a, i) { if(!confirm("Borrar?")) return; const p = state.deudas.find(d=>d.nombre===n && (d.apellido||'')===a); p.items.splice(i,1); saveState(); refreshAll(); }
+        function deletePlayer(n, a) { if(!confirm("Borrar?")) return; state.deudas = state.deudas.filter(d=>!(d.nombre===n && (d.apellido||'')===a)); saveState(); refreshAll(); }
+        function deletePendiente(n, a, i) { if(!confirm("Borrar?")) return; const p = state.pendientes.find(d=>d.nombre===n && (d.apellido||'')===a); p.motivos.splice(i,1); if(p.motivos.length===0) state.pendientes = state.pendientes.filter(x=>!(x.nombre===n && (x.apellido||'')===a)); saveState(); refreshAll(); }
+        function deleteCobrado(i) { if(!confirm("Borrar?")) return; state.cobrados.splice(i,1); saveState(); refreshAll(); }
+
+        function cycleCategory(n, a) {
+            if (!isEditMode) return;
+            const next = { '1ra': '3ra', '3ra': 'CT', 'CT': '1ra' };
+            const cur = getPlayerCategory(n, a);
+            [state.deudas, state.pendientes, state.cobrados].forEach(list => { if(list) list.forEach(p => { if(p.nombre===n && (p.apellido||'')===a) p.categoria = next[cur]; })});
+            saveState(); refreshAll();
+        }
+
+        function confirmarCobro(n, a, i) {
+            if (isEditMode) return;
+            const p = state.deudas.find(d=>d.nombre===n && (d.apellido||'')===a);
+            const item = p.items[i];
+            if(confirm(`Confirmar pago de ${n} por "${item}"?`)) {
+                p.items.splice(i, 1);
+                if(p.items.length===0) state.deudas = state.deudas.filter(x=>!(x.nombre===n && (x.apellido||'')===a));
+                if(!state.cobrados) state.cobrados = [];
+                state.cobrados.push({ nombre: n, apellido: a, categoria: p.categoria, monto: item, raw: parseMoney(item) });
+                saveState(); refreshAll();
+            }
+        }
+
+        function getOpcionesPorCategoria(cat) {
+            let ops = [...ruletaBase]; 
+            if (cat === '3ra') ops = ops.map(o => o === "$10.000" ? "$5.000" : (o === "10L de Agua" ? "5L de Agua" : o));
+            else if (cat === 'CT') ops = ops.filter(o => o !== "Duplica (tira de nuevo)");
+            return ops;
+        }
+
+        function abrirRuleta(nombre, apellido, motivo) {
+            if (isEditMode) return;
+            activeRuleta = { nombre, apellido, motivo };
+            currentResult = null;
+            isDuplicating = false; 
+            const p = state.pendientes.find(x => x.nombre === nombre && (x.apellido||'') === apellido);
+            activeRuletaOptions = getOpcionesPorCategoria(p.categoria || '1ra');
+            document.getElementById('ruleta-player').innerText = getNombreCompleto(p);
+            document.getElementById('ruleta-motivo').innerText = motivo;
+            const badge = document.getElementById('ruleta-cat-badge');
+            badge.innerText = p.categoria || '1ra';
+            badge.className = `text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${getCategoryBadgeClass(p.categoria)}`;
+            document.getElementById('ruleta-display').innerText = "¿Listo?";
+            document.getElementById('ruleta-display').className = "text-2xl font-black text-gray-400 uppercase leading-tight";
+            const btn = document.getElementById('btn-girar');
+            btn.innerText = "GIRAR RULETA";
+            btn.className = "py-3 px-4 rounded-lg bg-club-green text-white font-bold text-lg shadow-lg transform active:scale-95 transition-all";
+            btn.classList.remove('hidden');
+            document.getElementById('ruleta-actions').classList.add('hidden');
+            document.getElementById('ruleta-modal').classList.remove('hidden');
+        }
+
+        function girarRuleta() {
+            const display = document.getElementById('ruleta-display'), btn = document.getElementById('btn-girar');
+            btn.classList.add('hidden');
+            display.className = "text-3xl font-black text-gray-800 uppercase leading-tight ruleta-anim";
+            let speed = 50, counter = 0;
+            const run = () => {
+                const opt = activeRuletaOptions[Math.floor(Math.random() * activeRuletaOptions.length)];
+                display.innerText = isDuplicating ? "2x " + opt : opt;
+                if(counter < 25) { counter++; setTimeout(run, speed); }
+                else if(counter < 35) { counter++; speed += 25; setTimeout(run, speed); }
+                else {
+                    if (opt === "Duplica (tira de nuevo)") {
+                        isDuplicating = true;
+                        display.className = "text-3xl font-black text-orange-500 uppercase leading-tight transform scale-110 transition-all";
+                        activeRuletaOptions = activeRuletaOptions.filter(o => o !== "Duplica (tira de nuevo)"); 
+                        btn.innerText = "TIRAR DE NUEVO (X2)";
+                        btn.className = "py-3 px-4 rounded-lg bg-orange-500 text-white font-bold text-lg shadow-lg active:scale-95";
+                        btn.classList.remove('hidden');
+                    } else {
+                        currentResult = isDuplicating ? "2x " + opt : opt;
+                        display.className = "text-3xl font-black text-club-green uppercase leading-tight transform scale-110 transition-all";
+                        const acts = document.getElementById('ruleta-actions');
+                        acts.classList.remove('hidden'); acts.className = "grid grid-cols-2 gap-3 animate-fade-in";
+                    }
+                }
+            };
+            run();
+        }
+
+        function closeRuletaModal() { document.getElementById('ruleta-modal').classList.add('hidden'); activeRuleta = null; }
+
+        function confirmarRuleta() {
+            if(!currentResult) return;
+            const { nombre, apellido, motivo } = activeRuleta;
+            const p = state.pendientes.find(x => x.nombre === nombre && (x.apellido||'') === apellido);
+            p.motivos = p.motivos.filter(m => m !== motivo);
+            if(p.motivos.length === 0) state.pendientes = state.pendientes.filter(x => !(x.nombre === nombre && (x.apellido||'') === apellido));
+            const d = state.deudas.find(x => x.nombre === nombre && (x.apellido||'') === apellido);
+            if(d) d.items.push(currentResult); else state.deudas.push({ nombre, apellido, categoria: p.categoria, items: [currentResult] });
+            saveState(); closeRuletaModal(); refreshAll(); showTab('deudas');
+        }
+
+        function toggleAdmin() { document.getElementById('admin-modal').classList.toggle('hidden'); }
+        
+        function setMode(m) {
+            currentMode = m;
+            ['multa', 'ruleta', 'pago'].forEach(x => document.getElementById('mode-'+x).className = "p-3 rounded-lg border font-bold text-xs shadow-sm");
+            const btn = document.getElementById('mode-'+m);
+            if(m==='multa') btn.className += " border-red-200 bg-red-50 text-red-700 ring-2 ring-red-500";
+            else if(m==='ruleta') btn.className += " border-yellow-200 bg-yellow-50 text-yellow-700 ring-2 ring-yellow-500";
+            else btn.className += " border-green-200 bg-green-50 text-green-700 ring-2 ring-green-500";
+            document.getElementById('label-concepto').innerText = m==='multa' ? "Concepto" : (m==='ruleta' ? "Motivo" : "Monto ($)");
+            document.getElementById('input-categoria').disabled = m==='pago';
+        }
+
+        function guardarEntradaManual() {
+            const nombre = document.getElementById('input-nombre').value.trim();
+            const apellido = document.getElementById('input-apellido').value.trim();
+            const telefono = document.getElementById('input-telefono').value.trim();
+
+            const rawN = document.getElementById('input-jugador').value.trim();
+            const c = document.getElementById('input-concepto').value.trim();
+            const cat = document.getElementById('input-categoria').value;
+
+            if ((!nombre && !rawN) || !c) return;
+
+            const finalNombre = nombre || rawN;
+
+            let jugador = state.deudas.find(x => 
+                x.nombre === finalNombre && (x.apellido || '') === (apellido || '')
+            );
+
+            if(currentMode==='multa') {
+                if(jugador) {
+                    jugador.items.push(c);
+                } else {
+                    state.deudas.push({ 
+                        nombre: finalNombre,
+                        apellido,
+                        telefono,
+                        categoria: cat,
+                        items: [c] 
+                    });
+                }
+                showTab('deudas');
+            } 
+            else if(currentMode==='ruleta') {
+                let p = state.pendientes.find(x=>x.nombre===finalNombre && (x.apellido || '') === (apellido || ''));
+                if(p) {
+                    p.motivos.push(c);
+                } else {
+                    state.pendientes.push({ 
+                        nombre: finalNombre,
+                        apellido,
+                        telefono,
+                        categoria: cat,
+                        motivos: [c] 
+                    });
+                }
+                showTab('pendientes');
+            } 
+            else {
+                if(!state.cobrados) state.cobrados = [];
+                state.cobrados.push({ 
+                    nombre: finalNombre,
+                    apellido,
+                    telefono,
+                    categoria: cat,
+                    monto: c,
+                    raw: parseMoney(c) 
+                });
+                showTab('cobrados');
+            }
+
+            // Limpieza de campos post-carga
+            document.querySelectorAll('#input-jugador, #input-nombre, #input-apellido, #input-telefono, #input-concepto').forEach(el => el.value = '');
+
+            saveState();
+            toggleAdmin();
+            refreshAll();
+        }
+    </script>
+</body>
+</html>
